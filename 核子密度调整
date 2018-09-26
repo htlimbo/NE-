@@ -1,0 +1,236 @@
+
+# coding: utf-8
+
+# # 调整各个区域的核数据
+
+# **导入所需要的第三方函数库**
+
+# In[315]:
+
+
+import csv
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn
+get_ipython().run_line_magic('matplotlib', 'inline')
+
+
+# **导入BN-600（phase6）的各区核子密度数据**
+
+# In[316]:
+
+
+Nuclear_data = pd.read_csv('phase6.csv',index_col='Nuclide')
+
+
+# In[317]:
+
+
+#Nuclear_data.info()
+
+
+# # **筛选不同类型核素**
+# 
+# 分别选出fuel，coolant，steel三类核素，得到三个不同的dataframe进行分开处理
+# 
+# 下面我们定义了一个`filter_data`和`reading_stats`的函数，通过输入不同的条件(conditions),该函数可以帮助我们筛选出这部分的数据
+
+# In[318]:
+
+
+def filter_data(data, condition):
+    """
+    Remove elements that do not match the condition provided.
+    Takes a data list as input and returns a filtered list.
+    Conditions should be a list of strings of the following format:
+      '<field> <op> <value>'
+    where the following operations are valid: >, <, >=, <=, ==, !=
+    
+    Example: ["nu_type == 'fuel'","region_1 <= 7.55e-03"]
+    """
+
+    # Only want to split on first two spaces separating field from operator and
+    # operator from value: spaces within value should be retained.
+    field, op, value = condition.split(" ", 2)
+    
+    # check if field is valid
+    if field not in data.columns.values :
+        raise Exception("'{}' is not a feature of the dataframe. Did you spell something wrong?".format(field))
+
+    # convert value into number or strip excess quotes if string
+    try:
+        value = float(value)
+    except:
+        value = value.strip("\'\"")
+
+    # get booleans for filtering
+    if op == ">":
+        matches = data[field] > value
+    elif op == "<":
+        matches = data[field] < value
+    elif op == ">=":
+        matches = data[field] >= value
+    elif op == "<=":
+        matches = data[field] <= value
+    elif op == "==":
+        matches = data[field] == value
+    elif op == "!=":
+        matches = data[field] != value
+    else: # catch invalid operation codes
+        raise Exception("Invalid comparison operator. Only >, <, >=, <=, ==, != allowed.")
+    
+    # filter data and outcomes
+    data = data[matches]#.reset_index(drop = True)
+    return data
+
+
+# In[319]:
+
+
+def reading_stats(data, filters = []):
+    """
+    Report number of readings and average PM2.5 readings for data points that meet
+    specified filtering criteria.
+    """
+
+    n_data_all = data.shape[0]
+
+    # Apply filters to data
+    for condition in filters:
+        data = filter_data(data, condition)
+
+    # Compute number of data points that met the filter criteria.
+    n_data = data.shape[0]
+
+    # Return data
+    return data
+
+
+# In[405]:
+
+
+df_fuel = reading_stats(Nuclear_data, ["nu_type == 'fuel'"])
+df_coolant = reading_stats(Nuclear_data, ["nu_type == 'coolant'"])
+df_steel = reading_stats(Nuclear_data, ["nu_type == 'steel'"])
+#df_steel = reading_stats(Nuclear_data, ["nu_type == 'steel'","region_1 <= 7.55e-03"])
+
+
+# 在使用中，我们只需要调用`reading_stats`即可，我们在这个函数中调用了`filter_data`函数，因此并不需要我们直接操作`filter_data`函数。下面是对于该函数的一些提示。
+# 
+# `reading_stats`函数中包含有2个参数：
+# 
+# 1. 第一个参数（必须）：需要被加载的 dataframe，数据将从这里开始分析。
+# 2. 第二个参数（可选）：数据过滤器，可以根据一系列输入的条件(conditions)来过滤将要被分析的数据点。过滤器应作为一系列条件提供，每个条件之间使用逗号进行分割，并在外侧使用`""`将其定义为字符串格式，所有的条件使用`[]`包裹。每个单独的条件应该为包含三个元素的一个字符串：`'<field> <op> <value>'`（元素与元素之间需要有一个空格字符来作为间隔），`<op>`可以使用以下任意一个运算符：>、<、>=、<=、==、!=。数据点必须满足所有条件才能计算在内。例如，["nu_type == 'steel'"] 仅保留steel材料的数据。在第一个条件中, `<field>`是nu_type，`<op>`是 ==, `<value>`是'steel',因为steel为字符串，所以加了单引号，它们三个元素之间分别添加一个空格。最后，这个条件需要使用双引号引用起来。
+
+# # 核素数据调整
+
+# 对燃料的数据进行调整，删除了全为NAN的数据
+# 
+# 定义了新的函数:`ptb_data`,可以对筛选的某一种材料数据进行微小扰动
+
+# In[401]:
+
+
+def ptb_data(data,perturbation,filters = []):
+    """
+    Minor perturbation of nuclear density.
+    data : the source of data
+    perturbation : adjustment value
+    """    
+    
+    for condition in filters:
+        selected_data = filter_data(data, condition)
+        
+    field, op, value = condition.split(" ", 2)
+    
+    #Determine the start and end position of the selected data area
+    data_test = data.T[0:].dropna(how = 'all')
+    begin = 0
+    end = 0
+    while str(data_test.iloc[0][begin]) != value:
+        begin += 1
+        end += 1
+    while data_test.iloc[0][end] == value and end < data_test.shape[1]-1:
+        end += 1
+    if data_test.iloc[0][-1] == value:
+        end += 1
+    else:
+        pass
+    print(begin,end)
+    
+    #Determine whether the first 6 digits are region keywords#
+    start = 0
+    while data.T.index[start][:6] != 'region':
+        start += 1
+        
+    #Transpose and delete all rows that are NAN
+    data = data.T[start:].dropna(how = 'all')
+    
+    #perturbation the selected meterial's density 
+    data.iloc[:,begin:end] = selected_data.T[start:].dropna(how = 'all').apply(lambda x:x*(1+perturbation))
+    
+    # Return data
+    return data
+
+
+# In[412]:
+
+
+df_steel_adj = ptb_data(Nuclear_data,0.01,["nu_type == steel"])
+df_steel_adj
+
+
+# # 输出成vari3D所需要的格式的文件
+
+# 定义了新的函数:`write_eoc`,能够输出供给vari3d程序使用的文本(nt14格式)
+
+# In[413]:
+
+
+def write_eoc(data,filename):
+    """
+    Write the nuclides and nucleon densities of each region according to the format required by vari3d.
+    data : the source of data
+    """
+    #open a file#
+    f = open(filename,'w')
+    
+    #count number#
+    count = 0    #计数#
+    wrap = 0    #换行计数#
+    NAN_number = 0    #记录NAN数目#
+    
+    s = "14          Cr1aa "
+    for i in range(len(data)):
+        for j in range(len(data.T)):
+            if data.iloc[i][j] >= 0:
+                count += 1
+                wrap += 1
+                s = s + "{:<4}{:<3}{:.5e}".format(data.columns[j],chr(i+65),data.iloc[i][j])
+                if wrap%3 == 0 or j == len(data.T)-1: 
+                    f.write(str(s))
+                    f.write('\n')
+                    wrap = 0
+                    s = "14          Cr1aa "
+                else:
+                    pass
+            else:
+                NAN_number += 1
+                if wrap%3 == 0 or j == len(data.T)-1:
+                    f.write(str(s))
+                    f.write('\n')
+                    wrap = 0
+                    s = "14          Cr1aa "
+                else:
+                    pass
+
+    f.close()
+    print(count,wrap,NAN_number)
+
+
+# In[414]:
+
+
+write_eoc(df_steel_adj,'SteelDen.eoc')
+
